@@ -34,6 +34,8 @@ class Fconv_PCA(nn.Module):
         # iniw = Getini_reg(Basis.size(3), inNum, outNum, self.expand, weight)*iniScale
         self.expand = expand
         self.weights = nn.Parameter(torch.Tensor(outNum, inNum, expand, Basis.size(3)), requires_grad=True)
+        # print(Basis.shape)
+        # print(self.weights.shape)
         # nn.init.kaiming_uniform_(self.weights, a=0,mode='fan_in', nonlinearity='leaky_relu')
         if padding == None:
             self.padding = 0
@@ -46,26 +48,30 @@ class Fconv_PCA(nn.Module):
         self.reset_parameters()
     def forward(self, input):
     
-        if self.training:
+        if True:
             tranNum = self.tranNum
             outNum = self.outNum
             inNum = self.inNum
             expand = self.expand
-            tempW = torch.einsum('ijok,mnak->monaij', self.Basis, self.weights)
+            tempW = torch.einsum('ijok,mnak->monaij', self.Basis, self.weights) # (sizeP, sizeP, tranNum, Rank) * (outNum, inNum, expand, Rank) = (outNum, tranNum, inNum, expand, sizeP, sizeP)
             # tempW = torch.einsum('ijok,mnak->monaij', [self.Basis, self.weights])   # for torch<1.0
-            
+            print(tempW.shape, expand, tranNum)
             Num = tranNum//expand
-            tempWList = [torch.cat([tempW[:,i*Num:(i+1)*Num,:,-i:,:,:],tempW[:,i*Num:(i+1)*Num,:,:-i,:,:]], dim = 3) for i in range(expand)]   
+            # tempWList = [torch.cat([tempW[:,i*Num:(i+1)*Num,:,-i:,:,:],tempW[:,i*Num:(i+1)*Num,:,:-i,:,:]], dim = 3) for i in range(expand)]
+            tempWList = []
+            for i in range(expand):
+                tempWList.append(torch.cat([tempW[:,i*Num:(i+1)*Num,:,-i:,:,:],tempW[:,i*Num:(i+1)*Num,:,:-i,:,:]], dim = 3)) # 当 i == 0 时，不循环移位；当 i == 1 时，a[-1:]和a[:-1]分别为[3]和[0,1,2]以此类推
             tempW = torch.cat(tempWList, dim = 1)
+            print(tempW.shape)
             
             _filter = tempW.reshape([outNum*tranNum, inNum*self.expand, self.sizeP, self.sizeP ])
             if self.ifbias:
                 _bias = self.c.repeat([1,1,tranNum,1]).reshape([1,outNum*tranNum,1,1])
                 self.register_buffer("bias", _bias)
-        else:
-            _filter = self.filter
-            if self.ifbias:
-                _bias   = self.bias
+        # else:
+        #     _filter = self.filter
+        #     if self.ifbias:
+        #         _bias   = self.bias
         output = F.conv2d(input, _filter,
                         padding=self.padding,
                         dilation=1,
@@ -260,44 +266,64 @@ def Getini_reg(nNum, inNum, outNum,expand, weight = 1):
   
 
 def GetBasis_PCA(sizeP, tranNum=8, inP=None, Smooth = True):
+    """
+    相当于只是有inP * inP个频率的傅里叶波，在tranNum个旋转方向的sizeP * sizeP网格中采样
+    Args:
+        sizeP: 卷积核大小
+        tranNum: 旋转方向数，采样网格会旋转tranNum个方向
+        inP: 傅里叶波频率数
+        Smooth:
+
+    Returns:
+
+    """
     if inP==None:
         inP = sizeP
-    inX, inY, Mask = MaskC(sizeP, tranNum)
-    X0 = np.expand_dims(inX,2)
-    Y0 = np.expand_dims(inY,2)
+    inX, inY, Mask = MaskC(sizeP, tranNum) # 生成一个卷积核大小的圆形衰减掩码Mask，越到边缘越小
+    X0 = np.expand_dims(inX,2) # 将卷积核大小SizeP的矩阵X0, Y0, Mask增加一个维度，例如[7, 7, 1]
+    Y0 = np.expand_dims(inY,2) # X0和Y0共同组成了卷积核大小的采样点矩阵
     Mask = np.expand_dims(Mask,2)
-    theta = np.arange(tranNum)/tranNum*2*np.pi
-    theta = np.expand_dims(np.expand_dims(theta,axis=0),axis=0)
+    theta = np.arange(tranNum)/tranNum*2*np.pi # 长为tranNum的向量，如[0, π/4, π/2, ..., 7π/4]
+    theta = np.expand_dims(np.expand_dims(theta,axis=0),axis=0) # [1, 1, tranNum]
 #    theta = torch.FloatTensor(theta)
-    X = np.cos(theta)*X0-np.sin(theta)*Y0
+    X = np.cos(theta)*X0-np.sin(theta)*Y0 # [7, 7, 8]，第3个通道为8个不同旋转角度的采样点矩阵
     Y = np.cos(theta)*Y0+np.sin(theta)*X0
 #    X = X.unsqueeze(3).unsqueeze(4)
-    X = np.expand_dims(np.expand_dims(X,3),4)
+    X = np.expand_dims(np.expand_dims(X,3),4) # [7, 7, 8, 1, 1]
     Y = np.expand_dims(np.expand_dims(Y,3),4)
     v = np.pi/inP*(inP-1)
     p = inP/2
     
     k = np.reshape(np.arange(inP),[1,1,1,inP,1])
     l = np.reshape(np.arange(inP),[1,1,1,1,inP])
+
+    k_freq = k-inP*(k>p) # [0, 1, 2, 3, -3, -2, -1]
+    l_freq= l-inP*(l>p) # [0, 1, 2, 3, -3, -2, -1]
     
+    BasisC = np.cos(k_freq * v * X + l_freq * v * Y) # [7, 7, 8, 7, 7]
+    BasisS = np.sin(k_freq * v * X + l_freq * v * Y)
     
-    BasisC = np.cos((k-inP*(k>p))*v*X+(l-inP*(l>p))*v*Y)
-    BasisS = np.sin((k-inP*(k>p))*v*X+(l-inP*(l>p))*v*Y)
-    
-    BasisC = np.reshape(BasisC,[sizeP, sizeP, tranNum, inP*inP])*np.expand_dims(Mask,3)
+    BasisC = np.reshape(BasisC,[sizeP, sizeP, tranNum, inP*inP])*np.expand_dims(Mask,3) # 掩码
     BasisS = np.reshape(BasisS,[sizeP, sizeP, tranNum, inP*inP])*np.expand_dims(Mask,3)
 
-    BasisC = np.reshape(BasisC,[sizeP*sizeP*tranNum, inP*inP])
-    BasisS = np.reshape(BasisS,[sizeP*sizeP*tranNum, inP*inP])
+    BasisC = np.reshape(BasisC,[sizeP*sizeP*tranNum, inP*inP]) # [7 * 7 * 8, 7 * 7]的一个矩阵
+    BasisS = np.reshape(BasisS,[sizeP*sizeP*tranNum, inP*inP]) # 每行代表一个采样坐标，该行有 7 * 7 个采样值
 
-    BasisR = np.concatenate((BasisC, BasisS), axis = 1)
+    BasisR = np.concatenate((BasisC, BasisS), axis = 1) # [392, 98] 49个cosine + 49个sine
+    # print(BasisR.shape)
     
-    U,S,VT = np.linalg.svd(np.matmul(BasisR.T,BasisR))
+    U,S,VT = np.linalg.svd(np.matmul(BasisR.T,BasisR)) # B^T \cdot B [98, 98] 基函数之间的内积（相似度）矩阵
+    # U：特征向量矩阵[98, 98]，S：特征值[98, ]
 
-    Rank   = np.sum(S>0.0001)
-    BasisR = np.matmul(np.matmul(BasisR,U[:,:Rank]),np.diag(1/np.sqrt(S[:Rank]+0.0000000001))) 
+    Rank   = np.sum(S>0.0001) # 49, 由于BasisR中有一半为另一半的线性表出，Rank（几乎?）总是 2 * inP * inP 的一半
+    # print(Rank)
+    BasisR = np.matmul(np.matmul(BasisR,U[:,:Rank]),np.diag(1/np.sqrt(S[:Rank]+0.0000000001))) # 提取出主成分
+    # print(BasisR.shape)
+
     BasisR = np.reshape(BasisR,[sizeP, sizeP, tranNum, Rank])
-    
+    # print(BasisR.shape)
+
+
     temp = np.reshape(BasisR, [sizeP*sizeP, tranNum, Rank])
     var = (np.std(np.sum(temp, axis = 0)**2, axis=0)+np.std(np.sum(temp**2*sizeP*sizeP, axis = 0),axis = 0))/np.mean(np.sum(temp, axis = 0)**2+np.sum(temp**2*sizeP*sizeP, axis = 0),axis = 0)
     Trod = 1
@@ -307,13 +333,17 @@ def GetBasis_PCA(sizeP, tranNum=8, inP=None, Smooth = True):
     if Smooth:
         BasisR = np.expand_dims(np.expand_dims(np.expand_dims(Weight,0),0),0)*BasisR
 
+    # print(BasisR.shape)
     return torch.FloatTensor(BasisR), Rank, Weight
 
 def MaskC(SizeP, tranNum):
-        p = (SizeP-1)/2
-        x = np.arange(-p,p+1)/p
+        # p = (SizeP-1)/2
+        # x = np.arange(-p,p+1)/p
+        x = np.linspace(-1, 1, SizeP) # 等同于上述两行
+        # print(x, '\n', x1)
         X,Y  = np.meshgrid(x,x)
-        C    =X**2+Y**2
+        C    =X**2+Y**2 # [7, 7]
+        # print(C.shape)
         if tranNum ==4:
             Mask = np.ones([SizeP, SizeP])
         else:

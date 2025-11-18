@@ -1,1 +1,7 @@
 viz_out
+.idea
+.env
+.venv
+__pycache__/
+*.pyc
+.DS_Store

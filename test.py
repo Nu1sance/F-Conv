@@ -11,7 +11,8 @@ from F_Conv import Fconv_PCA
 #     tranNum=8,
 #     inP=3,
 #     padding=1,
-#     ifIni=0
+#     ifIni=0,
+#     bias=False
 # )
 #
 # print("=" * 60)
@@ -29,10 +30,10 @@ from F_Conv import Fconv_PCA
 # print(f"实际 Rank: {Rank}")
 #
 # # 偏置
-# print(f"\nBias shape: {conv.c.shape}")
+# print(f"\nBias shape: {conv.c.shape}") if conv.c is not None else print("Bias is False")
 #
 # # 总参数量
-# total_params = conv.weights.numel() + conv.c.numel()
+# total_params = conv.weights.numel() + conv.c.numel() if conv.c is not None else conv.weights.numel()
 # print(f"\n可训练参数总量: {total_params:,}")
 #
 # # 前向传播测试

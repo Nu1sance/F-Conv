@@ -275,7 +275,7 @@ def GetBasis_PCA(sizeP, tranNum=8, inP=None, Smooth = True):
         Smooth:
 
     Returns:
-
+        一个形状为[SizeP, SizeP, tranNum, SizeP * SizeP]的张量
     """
     if inP==None:
         inP = sizeP
@@ -316,12 +316,13 @@ def GetBasis_PCA(sizeP, tranNum=8, inP=None, Smooth = True):
     # U：特征向量矩阵[98, 98]，S：特征值[98, ]
 
     Rank   = np.sum(S>0.0001) # 49, 由于BasisR中有一半为另一半的线性表出，Rank（几乎?）总是 2 * inP * inP 的一半
-    # print(Rank)
+    # Rank 不一定是 2 * inP * inP 的一半，当 inP 为奇数时确实如此，但当 inP 为偶数时，Rank会更大
+    # print(f'Rank is {Rank}')
     BasisR = np.matmul(np.matmul(BasisR,U[:,:Rank]),np.diag(1/np.sqrt(S[:Rank]+0.0000000001))) # 提取出主成分
     # print(BasisR.shape)
 
     BasisR = np.reshape(BasisR,[sizeP, sizeP, tranNum, Rank])
-    # print(BasisR.shape)
+    # print(f'BasisR.shape is {BasisR.shape}')
 
 
     temp = np.reshape(BasisR, [sizeP*sizeP, tranNum, Rank])
@@ -333,7 +334,7 @@ def GetBasis_PCA(sizeP, tranNum=8, inP=None, Smooth = True):
     if Smooth:
         BasisR = np.expand_dims(np.expand_dims(np.expand_dims(Weight,0),0),0)*BasisR
 
-    # print(BasisR.shape)
+    # print(f'BasisR.shape is {BasisR.shape}')
     return torch.FloatTensor(BasisR), Rank, Weight
 
 def MaskC(SizeP, tranNum):

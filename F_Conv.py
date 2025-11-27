@@ -53,16 +53,18 @@ class Fconv_PCA(nn.Module):
             outNum = self.outNum
             inNum = self.inNum
             expand = self.expand
-            tempW = torch.einsum('ijok,mnak->monaij', self.Basis, self.weights) # (sizeP, sizeP, tranNum, Rank) * (outNum, inNum, expand, Rank) = (outNum, tranNum, inNum, expand, sizeP, sizeP)
+            # (sizeP, sizeP, tranNum, Rank) * (outNum, inNum, expand, Rank) = (outNum, tranNum, inNum, expand, sizeP, sizeP)
+            tempW = torch.einsum('ijok,mnak->monaij', self.Basis, self.weights)
             # tempW = torch.einsum('ijok,mnak->monaij', [self.Basis, self.weights])   # for torch<1.0
-            print(tempW.shape, expand, tranNum)
+            # print(tempW.shape, expand, tranNum)
             Num = tranNum//expand
             # tempWList = [torch.cat([tempW[:,i*Num:(i+1)*Num,:,-i:,:,:],tempW[:,i*Num:(i+1)*Num,:,:-i,:,:]], dim = 3) for i in range(expand)]
             tempWList = []
             for i in range(expand):
                 tempWList.append(torch.cat([tempW[:,i*Num:(i+1)*Num,:,-i:,:,:],tempW[:,i*Num:(i+1)*Num,:,:-i,:,:]], dim = 3)) # 当 i == 0 时，不循环移位；当 i == 1 时，a[-1:]和a[:-1]分别为[3]和[0,1,2]以此类推
             tempW = torch.cat(tempWList, dim = 1)
-            print(tempW.shape)
+            # print(tempW)
+            # expand 维度是不同的卷积核，tranNum 维度是平移 + 旋转
             
             _filter = tempW.reshape([outNum*tranNum, inNum*self.expand, self.sizeP, self.sizeP ])
             if self.ifbias:
